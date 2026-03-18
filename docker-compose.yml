@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-frontend:
+    build: ./web-frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./web-frontend/.env
+    depends_on:
+      - backend
+    restart: unless-stopped

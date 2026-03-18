@@ -140,6 +140,12 @@ docker-compose up --build
 | GET | `/api/admin/logs` | Admin | System logs |
 | POST | `/api/sync/queue` | All | Offline sync |
 
+## Deployment
+
+See [Deployment Guide](docs/deployment-guide.md) for:
+- Vercel (Web Frontend)
+- Docker/Railway (Backend)
+- Expo EAS (Mobile)
 
 ## Security
 
