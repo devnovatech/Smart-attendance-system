@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
-import { User, AttendanceEntry } from '../types';
+import { User, AttendanceEntry, Subject, Timetable } from '../types';
 import * as XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
 
@@ -358,6 +358,472 @@ export const updateConfig = async (req: Request, res: Response): Promise<void> =
   } catch (error) {
     console.error('updateConfig error:', error);
     res.status(500).json({ success: false, error: 'Failed to update config' });
+  }
+};
+
+// ---- Subject Management ----
+
+export const getSubjects = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const department = req.query.department as string | undefined;
+    const semester = req.query.semester as string | undefined;
+
+    let query: FirebaseFirestore.Query = db.collection('subjects');
+    if (department) query = query.where('department', '==', department);
+    if (semester) query = query.where('semester', '==', parseInt(semester));
+
+    const snapshot = await query.get();
+    const subjects = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    res.json({ success: true, data: subjects });
+  } catch (error) {
+    console.error('getSubjects error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch subjects' });
+  }
+};
+
+export const createSubject = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, code, department, semester, credits } = req.body;
+
+    // Check for duplicate code
+    const existing = await db.collection('subjects').where('code', '==', code).get();
+    if (!existing.empty) {
+      res.status(400).json({ success: false, error: 'Subject code already exists' });
+      return;
+    }
+
+    const subjectData: Omit<Subject, 'id'> = {
+      name,
+      code,
+      department,
+      semester,
+      credits,
+    };
+
+    const docRef = await db.collection('subjects').add(subjectData);
+
+    await db.collection('attendance_logs').add({
+      action: 'CREATE_SUBJECT',
+      userId: req.user!.uid,
+      details: `Created subject ${name} (${code})`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(201).json({ success: true, data: { id: docRef.id, ...subjectData } });
+  } catch (error) {
+    console.error('createSubject error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create subject' });
+  }
+};
+
+export const updateSubject = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const subjectDoc = await db.collection('subjects').doc(id).get();
+    if (!subjectDoc.exists) {
+      res.status(404).json({ success: false, error: 'Subject not found' });
+      return;
+    }
+
+    await db.collection('subjects').doc(id).update(updates);
+
+    res.json({ success: true, data: { id, ...updates } });
+  } catch (error) {
+    console.error('updateSubject error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update subject' });
+  }
+};
+
+export const deleteSubject = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    await db.collection('subjects').doc(id).delete();
+
+    await db.collection('attendance_logs').add({
+      action: 'DELETE_SUBJECT',
+      userId: req.user!.uid,
+      details: `Deleted subject ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, message: 'Subject deleted successfully' });
+  } catch (error) {
+    console.error('deleteSubject error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete subject' });
+  }
+};
+
+// ---- Class Management ----
+
+export const getClasses = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const department = req.query.department as string | undefined;
+    const semester = req.query.semester as string | undefined;
+
+    let query: FirebaseFirestore.Query = db.collection('classes');
+    if (department) query = query.where('department', '==', department);
+    if (semester) query = query.where('semester', '==', parseInt(semester));
+
+    const snapshot = await query.get();
+    const classes = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    res.json({ success: true, data: classes });
+  } catch (error) {
+    console.error('getClasses error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch classes' });
+  }
+};
+
+export const createClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, department, semester, section, academicYear } = req.body;
+
+    const classData = {
+      name,
+      department,
+      semester,
+      section,
+      academicYear: academicYear || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+      studentIds: [],
+    };
+
+    const docRef = await db.collection('classes').add(classData);
+
+    await db.collection('attendance_logs').add({
+      action: 'CREATE_CLASS',
+      userId: req.user!.uid,
+      details: `Created class ${name} (${department}, Sem ${semester}, Section ${section})`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(201).json({ success: true, data: { id: docRef.id, ...classData } });
+  } catch (error) {
+    console.error('createClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create class' });
+  }
+};
+
+export const updateClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    // Don't allow overwriting studentIds through general update
+    delete updates.studentIds;
+
+    await db.collection('classes').doc(id).update(updates);
+
+    res.json({ success: true, data: { id, ...updates } });
+  } catch (error) {
+    console.error('updateClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update class' });
+  }
+};
+
+export const deleteClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    await db.collection('classes').doc(id).delete();
+
+    // Also delete related timetables
+    const timetableSnapshot = await db.collection('timetables').where('classId', '==', id).get();
+    const batch = db.batch();
+    timetableSnapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+
+    await db.collection('attendance_logs').add({
+      action: 'DELETE_CLASS',
+      userId: req.user!.uid,
+      details: `Deleted class ${id} and related timetables`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, message: 'Class deleted successfully' });
+  } catch (error) {
+    console.error('deleteClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete class' });
+  }
+};
+
+// ---- Student-Class Assignment ----
+
+export const assignStudentsToClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { studentIds } = req.body;
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    const currentData = classDoc.data();
+    const currentStudentIds: string[] = currentData?.studentIds || [];
+    const newStudentIds = [...new Set([...currentStudentIds, ...studentIds])];
+
+    await db.collection('classes').doc(id).update({ studentIds: newStudentIds });
+
+    await db.collection('attendance_logs').add({
+      action: 'ASSIGN_STUDENTS',
+      userId: req.user!.uid,
+      details: `Assigned ${studentIds.length} student(s) to class ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, data: { classId: id, studentIds: newStudentIds } });
+  } catch (error) {
+    console.error('assignStudentsToClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to assign students' });
+  }
+};
+
+export const removeStudentsFromClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { studentIds } = req.body;
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    const currentData = classDoc.data();
+    const currentStudentIds: string[] = currentData?.studentIds || [];
+    const updatedStudentIds = currentStudentIds.filter((sid) => !studentIds.includes(sid));
+
+    await db.collection('classes').doc(id).update({ studentIds: updatedStudentIds });
+
+    await db.collection('attendance_logs').add({
+      action: 'REMOVE_STUDENTS',
+      userId: req.user!.uid,
+      details: `Removed ${studentIds.length} student(s) from class ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, data: { classId: id, studentIds: updatedStudentIds } });
+  } catch (error) {
+    console.error('removeStudentsFromClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove students' });
+  }
+};
+
+export const getClassDetails = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    const classData = classDoc.data();
+    const studentIds: string[] = classData?.studentIds || [];
+
+    // Fetch student details
+    const students = [];
+    for (const sid of studentIds) {
+      const userDoc = await db.collection('users').doc(sid).get();
+      if (userDoc.exists) {
+        const data = userDoc.data();
+        students.push({
+          uid: userDoc.id,
+          displayName: data?.displayName || 'Unknown',
+          email: data?.email || '',
+          rollNumber: data?.rollNumber || '',
+          studentId: data?.studentId || '',
+          department: data?.department || '',
+        });
+      }
+    }
+
+    // Fetch timetable entries for this class
+    const timetableSnapshot = await db.collection('timetables').where('classId', '==', id).get();
+    const timetables = timetableSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    res.json({
+      success: true,
+      data: {
+        id: classDoc.id,
+        ...classData,
+        students,
+        timetables,
+      },
+    });
+  } catch (error) {
+    console.error('getClassDetails error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch class details' });
+  }
+};
+
+// ---- Timetable Management ----
+
+export const getTimetables = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const classId = req.query.classId as string | undefined;
+    const teacherId = req.query.teacherId as string | undefined;
+
+    let query: FirebaseFirestore.Query = db.collection('timetables');
+    if (classId) query = query.where('classId', '==', classId);
+    if (teacherId) query = query.where('teacherId', '==', teacherId);
+
+    const snapshot = await query.get();
+    const timetables = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    // Enrich with teacher and class names
+    const enriched = [];
+    for (const tt of timetables) {
+      const ttData = tt as Record<string, unknown>;
+      let teacherName = '';
+      let className = '';
+
+      if (ttData.teacherId) {
+        const teacherDoc = await db.collection('users').doc(ttData.teacherId as string).get();
+        teacherName = teacherDoc.exists ? teacherDoc.data()?.displayName || '' : '';
+      }
+      if (ttData.classId) {
+        const classDoc = await db.collection('classes').doc(ttData.classId as string).get();
+        className = classDoc.exists ? classDoc.data()?.name || '' : '';
+      }
+
+      enriched.push({ ...tt, teacherName, className });
+    }
+
+    res.json({ success: true, data: enriched });
+  } catch (error) {
+    console.error('getTimetables error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch timetables' });
+  }
+};
+
+export const createTimetable = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { teacherId, classId, subject, dayOfWeek, startTime, endTime, room } = req.body;
+
+    // Validate teacher exists and is a teacher
+    const teacherDoc = await db.collection('users').doc(teacherId).get();
+    if (!teacherDoc.exists || teacherDoc.data()?.role !== 'teacher') {
+      res.status(400).json({ success: false, error: 'Invalid teacher ID' });
+      return;
+    }
+
+    // Validate class exists
+    const classDoc = await db.collection('classes').doc(classId).get();
+    if (!classDoc.exists) {
+      res.status(400).json({ success: false, error: 'Invalid class ID' });
+      return;
+    }
+
+    // Check for time conflicts for the teacher
+    const teacherSchedule = await db
+      .collection('timetables')
+      .where('teacherId', '==', teacherId)
+      .where('dayOfWeek', '==', dayOfWeek)
+      .get();
+
+    const hasConflict = teacherSchedule.docs.some((doc) => {
+      const data = doc.data();
+      return startTime < data.endTime && endTime > data.startTime;
+    });
+
+    if (hasConflict) {
+      res.status(400).json({ success: false, error: 'Teacher has a time conflict on this day' });
+      return;
+    }
+
+    // Check for time conflicts for the class
+    const classSchedule = await db
+      .collection('timetables')
+      .where('classId', '==', classId)
+      .where('dayOfWeek', '==', dayOfWeek)
+      .get();
+
+    const hasClassConflict = classSchedule.docs.some((doc) => {
+      const data = doc.data();
+      return startTime < data.endTime && endTime > data.startTime;
+    });
+
+    if (hasClassConflict) {
+      res.status(400).json({ success: false, error: 'Class has a time conflict on this day' });
+      return;
+    }
+
+    const timetableData: Omit<Timetable, 'id'> = {
+      teacherId,
+      classId,
+      subject,
+      dayOfWeek,
+      startTime,
+      endTime,
+      room,
+    };
+
+    const docRef = await db.collection('timetables').add(timetableData);
+
+    await db.collection('attendance_logs').add({
+      action: 'CREATE_TIMETABLE',
+      userId: req.user!.uid,
+      details: `Created timetable: ${subject} for class ${classDoc.data()?.name}, teacher ${teacherDoc.data()?.displayName}, day ${dayOfWeek}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(201).json({ success: true, data: { id: docRef.id, ...timetableData } });
+  } catch (error) {
+    console.error('createTimetable error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create timetable entry' });
+  }
+};
+
+export const updateTimetable = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const ttDoc = await db.collection('timetables').doc(id).get();
+    if (!ttDoc.exists) {
+      res.status(404).json({ success: false, error: 'Timetable entry not found' });
+      return;
+    }
+
+    await db.collection('timetables').doc(id).update(updates);
+
+    res.json({ success: true, data: { id, ...updates } });
+  } catch (error) {
+    console.error('updateTimetable error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update timetable entry' });
+  }
+};
+
+export const deleteTimetable = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    await db.collection('timetables').doc(id).delete();
+
+    await db.collection('attendance_logs').add({
+      action: 'DELETE_TIMETABLE',
+      userId: req.user!.uid,
+      details: `Deleted timetable entry ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, message: 'Timetable entry deleted successfully' });
+  } catch (error) {
+    console.error('deleteTimetable error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete timetable entry' });
   }
 };
 

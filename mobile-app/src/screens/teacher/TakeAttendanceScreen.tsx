@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   studentDisplay: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
   navRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
   navBtn: { padding: 8 },
@@ -397,8 +397,8 @@ const styles = StyleSheet.create({
     color: COLORS.gray,
   },
   studentName: { fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
-  studentMeta: { fontSize: 14, color: COLORS.gray, marginTop: 4 },
-  studentDept: { fontSize: 13, color: COLORS.gray, marginTop: 2 },
+  studentMeta: { fontSize: 14, color: COLORS.gray, marginTop: 4, textAlign: 'center' },
+  studentDept: { fontSize: 13, color: COLORS.gray, marginTop: 2, textAlign: 'center' },
   currentStatusBadge: {
     flexDirection: 'row',
     alignItems: 'center',

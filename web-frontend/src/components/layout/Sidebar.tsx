@@ -13,6 +13,8 @@ import {
   LogOut,
   FileText,
   BookOpen,
+  GraduationCap,
+  Clock,
 } from 'lucide-react';
 
 const teacherLinks = [
@@ -29,6 +31,9 @@ const studentLinks = [
 const adminLinks = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/users', label: 'Manage Users', icon: Users },
+  { href: '/admin/subjects', label: 'Subjects', icon: BookOpen },
+  { href: '/admin/classes', label: 'Classes', icon: GraduationCap },
+  { href: '/admin/timetable', label: 'Timetable', icon: Clock },
   { href: '/admin/reports', label: 'Reports', icon: BarChart3 },
   { href: '/admin/config', label: 'Settings', icon: Settings },
   { href: '/admin/logs', label: 'System Logs', icon: FileText },

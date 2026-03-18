@@ -60,6 +60,62 @@ export const configSchema = z.object({
   maxSyncRetries: z.number().min(0).optional(),
 });
 
+export const createSubjectSchema = z.object({
+  name: z.string().min(1, 'Subject name is required'),
+  code: z.string().min(1, 'Subject code is required'),
+  department: z.string().min(1, 'Department is required'),
+  semester: z.number().min(1).max(12),
+  credits: z.number().min(0).optional(),
+});
+
+export const updateSubjectSchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().min(1).optional(),
+  department: z.string().min(1).optional(),
+  semester: z.number().min(1).max(12).optional(),
+  credits: z.number().min(0).optional(),
+});
+
+export const createClassSchema = z.object({
+  name: z.string().min(1, 'Class name is required'),
+  department: z.string().min(1, 'Department is required'),
+  semester: z.number().min(1).max(12),
+  section: z.string().min(1, 'Section is required'),
+  academicYear: z.string().optional(),
+});
+
+export const updateClassSchema = z.object({
+  name: z.string().min(1).optional(),
+  department: z.string().min(1).optional(),
+  semester: z.number().min(1).max(12).optional(),
+  section: z.string().min(1).optional(),
+  academicYear: z.string().optional(),
+});
+
+export const assignStudentsSchema = z.object({
+  studentIds: z.array(z.string().min(1)).min(1, 'At least one student ID is required'),
+});
+
+export const createTimetableSchema = z.object({
+  teacherId: z.string().min(1, 'Teacher is required'),
+  classId: z.string().min(1, 'Class is required'),
+  subject: z.string().min(1, 'Subject is required'),
+  dayOfWeek: z.number().min(0).max(6),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/, 'Start time must be HH:mm'),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/, 'End time must be HH:mm'),
+  room: z.string().min(1, 'Room is required'),
+});
+
+export const updateTimetableSchema = z.object({
+  teacherId: z.string().min(1).optional(),
+  classId: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
+  dayOfWeek: z.number().min(0).max(6).optional(),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  room: z.string().min(1).optional(),
+});
+
 export const syncQueueSchema = z.object({
   items: z.array(
     z.object({

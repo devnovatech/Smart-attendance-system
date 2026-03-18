@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { ApiResponse } from '@/types';
 import toast from 'react-hot-toast';
-import { Users, BarChart3, Settings, FileText } from 'lucide-react';
+import { Users, BarChart3, Settings, FileText, BookOpen, GraduationCap, Clock } from 'lucide-react';
 import Link from 'next/link';
 
 interface ReportSummary {
@@ -96,13 +96,40 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Link href="/admin/users" className="card hover:shadow-md transition-shadow">
           <div className="flex items-center gap-3">
             <Users className="w-5 h-5 text-primary" />
             <div>
               <h3 className="font-semibold">Manage Users</h3>
               <p className="text-sm text-gray-500">Add, edit, or remove users</p>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/subjects" className="card hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <BookOpen className="w-5 h-5 text-primary" />
+            <div>
+              <h3 className="font-semibold">Manage Subjects</h3>
+              <p className="text-sm text-gray-500">Add and manage course subjects</p>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/classes" className="card hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <GraduationCap className="w-5 h-5 text-primary" />
+            <div>
+              <h3 className="font-semibold">Manage Classes</h3>
+              <p className="text-sm text-gray-500">Create classes and assign students</p>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/timetable" className="card hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <Clock className="w-5 h-5 text-primary" />
+            <div>
+              <h3 className="font-semibold">Timetable</h3>
+              <p className="text-sm text-gray-500">Assign teachers to classes with schedules</p>
             </div>
           </div>
         </Link>

@@ -45,9 +45,12 @@ smart-attendance-system/
 - Push notifications (Expo)
 
 ### Admin Panel
+- **Subject Management** — Create, edit, delete subjects (code, name, department, semester, credits)
+- **Class Management** — Create classes (department, semester, section, academic year) and assign/remove students
+- **Timetable & Scheduling** — Assign teachers to classes with subject, day, time slot, and room; automatic conflict detection for both teacher and class schedules
+- User management (CRUD teachers/students/admins)
 - Campus-wide attendance reports
 - Export Excel/PDF
-- User management (CRUD teachers/students)
 - Configure threshold policy
 - System logs viewer
 
@@ -133,6 +136,21 @@ docker-compose up --build
 | POST | `/api/admin/users` | Admin | Create user |
 | PUT | `/api/admin/users/:id` | Admin | Update user |
 | DELETE | `/api/admin/users/:id` | Admin | Delete user |
+| GET | `/api/admin/subjects` | Admin | List subjects |
+| POST | `/api/admin/subjects` | Admin | Create subject |
+| PUT | `/api/admin/subjects/:id` | Admin | Update subject |
+| DELETE | `/api/admin/subjects/:id` | Admin | Delete subject |
+| GET | `/api/admin/classes` | Admin | List classes |
+| POST | `/api/admin/classes` | Admin | Create class |
+| GET | `/api/admin/classes/:id` | Admin | Class details (students + timetable) |
+| PUT | `/api/admin/classes/:id` | Admin | Update class |
+| DELETE | `/api/admin/classes/:id` | Admin | Delete class |
+| POST | `/api/admin/classes/:id/students` | Admin | Assign students to class |
+| DELETE | `/api/admin/classes/:id/students` | Admin | Remove students from class |
+| GET | `/api/admin/timetables` | Admin | List timetable entries |
+| POST | `/api/admin/timetables` | Admin | Create timetable entry |
+| PUT | `/api/admin/timetables/:id` | Admin | Update timetable entry |
+| DELETE | `/api/admin/timetables/:id` | Admin | Delete timetable entry |
 | GET | `/api/admin/reports` | Admin | Reports |
 | GET | `/api/admin/reports/export/excel` | Admin | Excel export |
 | GET | `/api/admin/reports/export/pdf` | Admin | PDF export |

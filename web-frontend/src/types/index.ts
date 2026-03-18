@@ -23,12 +23,22 @@ export interface Timetable {
   room: string;
 }
 
+export interface Subject {
+  id: string;
+  name: string;
+  code: string;
+  department: string;
+  semester: number;
+  credits?: number;
+}
+
 export interface ClassInfo {
   id: string;
   name: string;
   department: string;
   semester: number;
   section: string;
+  academicYear: string;
   studentIds: string[];
 }
 
