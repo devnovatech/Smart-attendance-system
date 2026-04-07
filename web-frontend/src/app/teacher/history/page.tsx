@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
 import api from '@/lib/api';
@@ -25,7 +25,7 @@ interface AttendanceRecord {
   records: AttendanceEntry[];
 }
 
-export default function TeacherHistoryPage() {
+function TeacherHistoryContent() {
   const searchParams = useSearchParams();
   const classId = searchParams.get('classId');
   const subject = searchParams.get('subject');
@@ -160,5 +160,13 @@ export default function TeacherHistoryPage() {
         )}
       </div>
     </AppLayout>
+  );
+}
+
+export default function TeacherHistoryPage() {
+  return (
+    <Suspense fallback={<AppLayout><div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div></AppLayout>}>
+      <TeacherHistoryContent />
+    </Suspense>
   );
 }
