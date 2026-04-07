@@ -1,7 +1,7 @@
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, enableIndexedDbPersistence, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,14 +12,19 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+function getFirebaseApp(): FirebaseApp | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+}
 
-export const firebaseAuth = getAuth(app);
-export const firestore = getFirestore(app);
-export const storage = getStorage(app);
+const app = getFirebaseApp();
+
+export const firebaseAuth = app ? getAuth(app) : (undefined as unknown as Auth);
+export const firestore = app ? getFirestore(app) : (undefined as unknown as Firestore);
+export const storage = app ? getStorage(app) : (undefined as unknown as FirebaseStorage);
 
 // Enable offline persistence
-if (typeof window !== 'undefined') {
+if (app) {
   enableIndexedDbPersistence(firestore).catch((err) => {
     if (err.code === 'failed-precondition') {
       console.warn('Persistence failed: multiple tabs open');
