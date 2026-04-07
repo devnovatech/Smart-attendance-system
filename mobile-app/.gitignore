@@ -3,3 +3,10 @@ node_modules/
 dist/
 .env
 *.log
+
+# Firebase config files (contain API keys)
+google-services.json
+GoogleService-Info.plist
+ios/SmartAttendance/GoogleService-Info.plist
+android/app/google-services.json
+eas.json
