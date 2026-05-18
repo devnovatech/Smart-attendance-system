@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getUsers,
   createUser,
+  bulkCreateUsers,
   updateUser,
   deleteUser,
   getReports,
@@ -9,11 +10,13 @@ import {
   exportPdf,
   getConfig,
   updateConfig,
+  getDepartments,
+  updateDepartments,
   getLogs,
-  getSubjects,
-  createSubject,
-  updateSubject,
-  deleteSubject,
+  getCourses,
+  createCourse,
+  updateCourse,
+  deleteCourse,
   getClasses,
   createClass,
   updateClass,
@@ -21,6 +24,8 @@ import {
   getClassDetails,
   assignStudentsToClass,
   removeStudentsFromClass,
+  assignCoursesToClass,
+  removeCoursesFromClass,
   getTimetables,
   createTimetable,
   updateTimetable,
@@ -31,12 +36,15 @@ import { validate } from '../middleware/validate';
 import {
   createUserSchema,
   updateUserSchema,
+  bulkCreateUsersSchema,
   configSchema,
-  createSubjectSchema,
-  updateSubjectSchema,
+  departmentsSchema,
+  createCourseSchema,
+  updateCourseSchema,
   createClassSchema,
   updateClassSchema,
   assignStudentsSchema,
+  assignCoursesSchema,
   createTimetableSchema,
   updateTimetableSchema,
 } from '../validators';
@@ -84,6 +92,15 @@ router.post('/users', validate(createUserSchema), createUser);
 
 /**
  * @swagger
+ * /api/admin/users/bulk:
+ *   post:
+ *     summary: Bulk-create users (Excel import)
+ *     tags: [Admin]
+ */
+router.post('/users/bulk', validate(bulkCreateUsersSchema), bulkCreateUsers);
+
+/**
+ * @swagger
  * /api/admin/users/{id}:
  *   put:
  *     summary: Update a user
@@ -100,12 +117,12 @@ router.put('/users/:id', validate(updateUserSchema), updateUser);
  */
 router.delete('/users/:id', deleteUser);
 
-// Subject Management
+// Course Management
 /**
  * @swagger
- * /api/admin/subjects:
+ * /api/admin/courses:
  *   get:
- *     summary: List all subjects
+ *     summary: List all courses
  *     tags: [Admin]
  *     parameters:
  *       - in: query
@@ -117,34 +134,34 @@ router.delete('/users/:id', deleteUser);
  *         schema:
  *           type: integer
  */
-router.get('/subjects', getSubjects);
+router.get('/courses', getCourses);
 
 /**
  * @swagger
- * /api/admin/subjects:
+ * /api/admin/courses:
  *   post:
- *     summary: Create a new subject
+ *     summary: Create a new course
  *     tags: [Admin]
  */
-router.post('/subjects', validate(createSubjectSchema), createSubject);
+router.post('/courses', validate(createCourseSchema), createCourse);
 
 /**
  * @swagger
- * /api/admin/subjects/{id}:
+ * /api/admin/courses/{id}:
  *   put:
- *     summary: Update a subject
+ *     summary: Update a course
  *     tags: [Admin]
  */
-router.put('/subjects/:id', validate(updateSubjectSchema), updateSubject);
+router.put('/courses/:id', validate(updateCourseSchema), updateCourse);
 
 /**
  * @swagger
- * /api/admin/subjects/{id}:
+ * /api/admin/courses/{id}:
  *   delete:
- *     summary: Delete a subject
+ *     summary: Delete a course
  *     tags: [Admin]
  */
-router.delete('/subjects/:id', deleteSubject);
+router.delete('/courses/:id', deleteCourse);
 
 // Class Management
 /**
@@ -178,7 +195,7 @@ router.post('/classes', validate(createClassSchema), createClass);
  * @swagger
  * /api/admin/classes/{id}:
  *   get:
- *     summary: Get class details with students and timetable
+ *     summary: Get class details with students, courses, and timetable
  *     tags: [Admin]
  */
 router.get('/classes/:id', getClassDetails);
@@ -218,6 +235,24 @@ router.post('/classes/:id/students', validate(assignStudentsSchema), assignStude
  *     tags: [Admin]
  */
 router.delete('/classes/:id/students', removeStudentsFromClass);
+
+/**
+ * @swagger
+ * /api/admin/classes/{id}/courses:
+ *   post:
+ *     summary: Assign courses to a class
+ *     tags: [Admin]
+ */
+router.post('/classes/:id/courses', validate(assignCoursesSchema), assignCoursesToClass);
+
+/**
+ * @swagger
+ * /api/admin/classes/{id}/courses:
+ *   delete:
+ *     summary: Remove courses from a class
+ *     tags: [Admin]
+ */
+router.delete('/classes/:id/courses', removeCoursesFromClass);
 
 // Timetable Management
 /**
@@ -313,6 +348,25 @@ router.get('/config', getConfig);
  *     tags: [Admin]
  */
 router.put('/config', validate(configSchema), updateConfig);
+
+// Departments (used as dropdown source for users/courses/classes)
+/**
+ * @swagger
+ * /api/admin/departments:
+ *   get:
+ *     summary: Get the list of departments
+ *     tags: [Admin]
+ */
+router.get('/departments', getDepartments);
+
+/**
+ * @swagger
+ * /api/admin/departments:
+ *   put:
+ *     summary: Replace the list of departments
+ *     tags: [Admin]
+ */
+router.put('/departments', validate(departmentsSchema), updateDepartments);
 
 // Logs
 /**

@@ -10,20 +10,22 @@ export interface User {
   studentId?: string;
   department?: string;
   photoURL?: string;
+  guardianPhone?: string;
 }
 
 export interface Timetable {
   id: string;
   teacherId: string;
   classId: string;
-  subject: string;
+  courseId: string;
+  subject: string; // snapshot of course name
   dayOfWeek: number;
   startTime: string;
   endTime: string;
   room: string;
 }
 
-export interface Subject {
+export interface Course {
   id: string;
   name: string;
   code: string;
@@ -40,12 +42,14 @@ export interface ClassInfo {
   section: string;
   academicYear: string;
   studentIds: string[];
+  courseIds: string[];
 }
 
 export interface AttendanceRecord {
   id: string;
   classId: string;
   teacherId: string;
+  courseId?: string;
   subject: string;
   date: string;
   startedAt: string;
@@ -61,7 +65,7 @@ export interface AttendanceEntry {
   markedBy: string;
 }
 
-export interface SubjectStats {
+export interface CourseStats {
   total: number;
   present: number;
   late: number;
@@ -70,7 +74,7 @@ export interface SubjectStats {
 }
 
 export interface DashboardData {
-  subjects: Record<string, SubjectStats>;
+  subjects: Record<string, CourseStats>;
   threshold: number;
   alerts: { subject: string; percentage: number; message: string }[];
 }
@@ -84,4 +88,15 @@ export interface ApiResponse<T = unknown> {
   page?: number;
   limit?: number;
   totalPages?: number;
+}
+
+export interface BulkUserRow {
+  email: string;
+  password: string;
+  displayName: string;
+  role: UserRole;
+  rollNumber?: string;
+  studentId?: string;
+  department?: string;
+  guardianPhone?: string;
 }

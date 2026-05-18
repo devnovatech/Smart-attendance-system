@@ -102,13 +102,55 @@ export default function TakeAttendanceScreen({ route, navigation }: { route: any
     await submitAttendance();
   };
 
+  const sendWhatsAppToGuardians = async () => {
+    try {
+      const res = await api.post<ApiResponse<{ sent: number; failed: number; skipped: number }>>(
+        `/teacher/${classId}/attendance/notify-guardians`,
+        { subject }
+      );
+      const { sent = 0, failed = 0, skipped = 0 } = res.data || {};
+      const parts: string[] = [];
+      if (sent > 0) parts.push(`Sent to ${sent} guardian(s)`);
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (skipped > 0) parts.push(`${skipped} skipped (no guardian number)`);
+      Alert.alert('WhatsApp', parts.length ? parts.join('\n') : 'No messages to send');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send WhatsApp notifications';
+      Alert.alert(
+        'WhatsApp',
+        message.includes('not configured')
+          ? 'WhatsApp is not configured on the server. Contact an admin.'
+          : message
+      );
+    }
+  };
+
   const submitAttendance = async () => {
     setSubmitting(true);
     try {
       await api.post(`/teacher/${classId}/attendance/submit`, { confirmSkipped: true });
-      Alert.alert('Success', 'Attendance submitted successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+
+      const hasGuardians = students.some((s) => s.student.guardianPhone && s.status);
+      if (hasGuardians) {
+        Alert.alert(
+          'Attendance Submitted!',
+          'Would you like to send attendance reports to guardians via WhatsApp?',
+          [
+            { text: 'Skip', onPress: () => navigation.goBack() },
+            {
+              text: 'Send WhatsApp',
+              onPress: async () => {
+                await sendWhatsAppToGuardians();
+                navigation.goBack();
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Success', 'Attendance submitted successfully!', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      }
     } catch {
       Alert.alert('Error', 'Failed to submit attendance');
     } finally {

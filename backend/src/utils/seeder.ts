@@ -4,7 +4,13 @@ dotenv.config();
 import { auth, db } from '../config/firebase';
 
 const DEPARTMENTS = ['Computer Science', 'Electronics', 'Mechanical'];
-const SUBJECTS = ['Data Structures', 'Operating Systems', 'Database Management', 'Computer Networks', 'Software Engineering'];
+const COURSES = [
+  { name: 'Data Structures', code: 'CS201', semester: 1 },
+  { name: 'Operating Systems', code: 'CS301', semester: 2 },
+  { name: 'Database Management', code: 'CS302', semester: 2 },
+  { name: 'Computer Networks', code: 'CS401', semester: 2 },
+  { name: 'Software Engineering', code: 'CS402', semester: 1 },
+];
 
 async function seed() {
   console.log('Starting seed...');
@@ -27,25 +33,49 @@ async function seed() {
     console.log(`Created teacher: ${teacher.uid}`);
   }
 
-  // Create classes
-  const classIds: string[] = [];
+  // Create courses
+  const courseRecords: { id: string; name: string; semester: number }[] = [];
+  for (const c of COURSES) {
+    const existing = await db.collection('courses').where('code', '==', c.code).get();
+    if (!existing.empty) {
+      const doc = existing.docs[0];
+      courseRecords.push({ id: doc.id, name: c.name, semester: c.semester });
+      console.log(`Course already exists: ${c.code}`);
+      continue;
+    }
+    const ref = await db.collection('courses').add({
+      name: c.name,
+      code: c.code,
+      department: 'Computer Science',
+      semester: c.semester,
+      credits: 4,
+    });
+    courseRecords.push({ id: ref.id, name: c.name, semester: c.semester });
+    console.log(`Created course: ${c.code}`);
+  }
+
+  // Create classes (with courseIds matching the semester)
+  const classRecords: { id: string; semester: number; courseIds: string[] }[] = [];
   for (let sem = 1; sem <= 2; sem++) {
     for (const section of ['A', 'B']) {
+      const courseIdsForSem = courseRecords.filter((c) => c.semester === sem).map((c) => c.id);
       const classRef = await db.collection('classes').add({
         name: `CS-${sem}${section}`,
         department: 'Computer Science',
         semester: sem,
         section,
+        academicYear: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
         studentIds: [],
+        courseIds: courseIdsForSem,
       });
-      classIds.push(classRef.id);
+      classRecords.push({ id: classRef.id, semester: sem, courseIds: courseIdsForSem });
       console.log(`Created class: CS-${sem}${section}`);
     }
   }
 
   // Create students and assign to classes
   let studentIndex = 0;
-  for (const classId of classIds) {
+  for (const cls of classRecords) {
     const studentIds: string[] = [];
     for (let i = 1; i <= 10; i++) {
       studentIndex++;
@@ -65,23 +95,26 @@ async function seed() {
       console.log(`Created student: STU${rollNum}`);
     }
 
-    await db.collection('classes').doc(classId).update({ studentIds });
+    await db.collection('classes').doc(cls.id).update({ studentIds });
   }
 
-  // Create timetable entries
+  // Create timetable entries (one per teacher per weekday)
   const days = [1, 2, 3, 4, 5]; // Mon-Fri
   for (let ti = 0; ti < teachers.length; ti++) {
     for (let di = 0; di < days.length; di++) {
-      const classIdx = di % classIds.length;
-      const subjectIdx = (ti + di) % SUBJECTS.length;
+      const cls = classRecords[di % classRecords.length];
+      if (cls.courseIds.length === 0) continue;
+      const courseId = cls.courseIds[(ti + di) % cls.courseIds.length];
+      const course = courseRecords.find((c) => c.id === courseId);
 
       await db.collection('timetables').add({
         teacherId: teachers[ti],
-        classId: classIds[classIdx],
-        subject: SUBJECTS[subjectIdx],
+        classId: cls.id,
+        courseId,
+        subject: course?.name || 'Course',
         dayOfWeek: days[di],
-        startTime: `${9 + ti}:00`,
-        endTime: `${10 + ti}:00`,
+        startTime: `${String(9 + ti).padStart(2, '0')}:00`,
+        endTime: `${String(10 + ti).padStart(2, '0')}:00`,
         room: `Room ${100 + ti * 10 + di}`,
       });
     }
@@ -94,10 +127,13 @@ async function seed() {
     date.setDate(date.getDate() - daysAgo);
     const dateStr = date.toISOString().split('T')[0];
 
-    for (let ci = 0; ci < Math.min(2, classIds.length); ci++) {
-      const classDoc = await db.collection('classes').doc(classIds[ci]).get();
+    for (let ci = 0; ci < Math.min(2, classRecords.length); ci++) {
+      const cls = classRecords[ci];
+      const classDoc = await db.collection('classes').doc(cls.id).get();
       const classData = classDoc.data();
       const studentIds: string[] = classData?.studentIds || [];
+      const courseId = cls.courseIds[0];
+      const course = courseRecords.find((c) => c.id === courseId);
 
       const records = studentIds.map((sid) => ({
         studentId: sid,
@@ -107,9 +143,10 @@ async function seed() {
       }));
 
       await db.collection('attendance_records').add({
-        classId: classIds[ci],
+        classId: cls.id,
         teacherId: teachers[0],
-        subject: SUBJECTS[ci],
+        courseId,
+        subject: course?.name || 'Course',
         date: dateStr,
         startedAt: date.toISOString(),
         completedAt: date.toISOString(),
@@ -119,13 +156,17 @@ async function seed() {
     }
   }
 
-  // Create default config
-  await db.collection('config').doc('global').set({
-    attendanceThreshold: 75,
-    lateMarkMinutes: 15,
-    allowOfflineSync: true,
-    maxSyncRetries: 3,
-  });
+  // Create default config (now including departments)
+  await db.collection('config').doc('global').set(
+    {
+      attendanceThreshold: 75,
+      lateMarkMinutes: 15,
+      allowOfflineSync: true,
+      maxSyncRetries: 3,
+      departments: DEPARTMENTS,
+    },
+    { merge: true }
+  );
 
   console.log('Seed completed successfully!');
   console.log('\nTest Accounts:');

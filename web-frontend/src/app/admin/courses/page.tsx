@@ -3,15 +3,16 @@
 import { useEffect, useState, FormEvent } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import api from '@/lib/api';
-import { ApiResponse, Subject } from '@/types';
+import { ApiResponse, Course } from '@/types';
 import toast from 'react-hot-toast';
 import { Plus, Edit2, Trash2, X, BookOpen } from 'lucide-react';
 
-export default function AdminSubjectsPage() {
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+export default function AdminCoursesPage() {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [form, setForm] = useState({
     name: '',
@@ -22,19 +23,32 @@ export default function AdminSubjectsPage() {
   });
 
   useEffect(() => {
-    loadSubjects();
+    loadCourses();
   }, [departmentFilter]);
 
-  const loadSubjects = async () => {
+  useEffect(() => {
+    loadDepartments();
+  }, []);
+
+  const loadDepartments = async () => {
+    try {
+      const res = await api.get<ApiResponse<string[]>>('/admin/departments');
+      if (res.data) setDepartments(res.data);
+    } catch {
+      // Non-fatal — fall back to empty list
+    }
+  };
+
+  const loadCourses = async () => {
     setLoading(true);
     try {
       const params: Record<string, string> = {};
       if (departmentFilter) params.department = departmentFilter;
 
-      const res = await api.get<ApiResponse<Subject[]>>('/admin/subjects', params);
-      if (res.data) setSubjects(res.data);
+      const res = await api.get<ApiResponse<Course[]>>('/admin/courses', params);
+      if (res.data) setCourses(res.data);
     } catch {
-      toast.error('Failed to load subjects');
+      toast.error('Failed to load courses');
     } finally {
       setLoading(false);
     }
@@ -42,51 +56,53 @@ export default function AdminSubjectsPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!form.department) {
+      toast.error('Please pick a department');
+      return;
+    }
     try {
-      if (editingSubject) {
-        await api.put(`/admin/subjects/${editingSubject.id}`, form);
-        toast.success('Subject updated');
+      if (editingCourse) {
+        await api.put(`/admin/courses/${editingCourse.id}`, form);
+        toast.success('Course updated');
       } else {
-        await api.post('/admin/subjects', form);
-        toast.success('Subject created');
+        await api.post('/admin/courses', form);
+        toast.success('Course created');
       }
       setShowModal(false);
       resetForm();
-      loadSubjects();
+      loadCourses();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Operation failed');
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete subject "${name}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete course "${name}"? This cannot be undone.`)) return;
     try {
-      await api.delete(`/admin/subjects/${id}`);
-      toast.success('Subject deleted');
-      loadSubjects();
+      await api.delete(`/admin/courses/${id}`);
+      toast.success('Course deleted');
+      loadCourses();
     } catch {
-      toast.error('Failed to delete subject');
+      toast.error('Failed to delete course');
     }
   };
 
-  const openEdit = (subject: Subject) => {
-    setEditingSubject(subject);
+  const openEdit = (course: Course) => {
+    setEditingCourse(course);
     setForm({
-      name: subject.name,
-      code: subject.code,
-      department: subject.department,
-      semester: subject.semester,
-      credits: subject.credits || 0,
+      name: course.name,
+      code: course.code,
+      department: course.department,
+      semester: course.semester,
+      credits: course.credits || 0,
     });
     setShowModal(true);
   };
 
   const resetForm = () => {
-    setEditingSubject(null);
-    setForm({ name: '', code: '', department: '', semester: 1, credits: 0 });
+    setEditingCourse(null);
+    setForm({ name: '', code: '', department: departments[0] || '', semester: 1, credits: 0 });
   };
-
-  const departments = Array.from(new Set(subjects.map((s) => s.department))).filter(Boolean);
 
   return (
     <AppLayout>
@@ -94,10 +110,10 @@ export default function AdminSubjectsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <BookOpen className="w-6 h-6 text-primary" />
-            <h1 className="text-2xl font-bold">Manage Subjects</h1>
+            <h1 className="text-2xl font-bold">Manage Courses</h1>
           </div>
           <button onClick={() => { resetForm(); setShowModal(true); }} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Add Subject
+            <Plus className="w-4 h-4" /> Add Course
           </button>
         </div>
 
@@ -128,10 +144,10 @@ export default function AdminSubjectsPage() {
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
           </div>
-        ) : subjects.length === 0 ? (
+        ) : courses.length === 0 ? (
           <div className="card text-center py-12">
             <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500">No subjects found. Create your first subject.</p>
+            <p className="text-gray-500">No courses found. Create your first course.</p>
           </div>
         ) : (
           <div className="card overflow-x-auto">
@@ -147,19 +163,19 @@ export default function AdminSubjectsPage() {
                 </tr>
               </thead>
               <tbody>
-                {subjects.map((subject) => (
-                  <tr key={subject.id} className="border-b hover:bg-gray-50">
-                    <td className="py-3 px-3 font-mono font-medium">{subject.code}</td>
-                    <td className="py-3 px-3">{subject.name}</td>
-                    <td className="py-3 px-3 text-gray-600">{subject.department}</td>
-                    <td className="py-3 px-3 text-gray-600">{subject.semester}</td>
-                    <td className="py-3 px-3 text-gray-600">{subject.credits || '-'}</td>
+                {courses.map((course) => (
+                  <tr key={course.id} className="border-b hover:bg-gray-50">
+                    <td className="py-3 px-3 font-mono font-medium">{course.code}</td>
+                    <td className="py-3 px-3">{course.name}</td>
+                    <td className="py-3 px-3 text-gray-600">{course.department}</td>
+                    <td className="py-3 px-3 text-gray-600">{course.semester}</td>
+                    <td className="py-3 px-3 text-gray-600">{course.credits || '-'}</td>
                     <td className="py-3 px-3">
                       <div className="flex gap-2">
-                        <button onClick={() => openEdit(subject)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                        <button onClick={() => openEdit(course)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDelete(subject.id, subject.name)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                        <button onClick={() => handleDelete(course.id, course.name)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -176,24 +192,39 @@ export default function AdminSubjectsPage() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">{editingSubject ? 'Edit Subject' : 'Create Subject'}</h3>
+                <h3 className="text-lg font-semibold">{editingCourse ? 'Edit Course' : 'Create Course'}</h3>
                 <button onClick={() => setShowModal(false)} className="p-1 hover:bg-gray-100 rounded">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject Code</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Course Code</label>
                   <input type="text" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} className="input-field" placeholder="e.g. CS101" required />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject Name</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Course Name</label>
                   <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-field" placeholder="e.g. Data Structures" required />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                    <input type="text" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className="input-field" placeholder="e.g. CSE" required />
+                    <select
+                      value={form.department}
+                      onChange={(e) => setForm({ ...form, department: e.target.value })}
+                      className="input-field"
+                      required
+                    >
+                      <option value="">Select department</option>
+                      {departments.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                    {departments.length === 0 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        No departments yet — add some in System Settings first.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
@@ -206,7 +237,7 @@ export default function AdminSubjectsPage() {
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">Cancel</button>
-                  <button type="submit" className="btn-primary flex-1">{editingSubject ? 'Update' : 'Create'}</button>
+                  <button type="submit" className="btn-primary flex-1">{editingCourse ? 'Update' : 'Create'}</button>
                 </div>
               </form>
             </div>

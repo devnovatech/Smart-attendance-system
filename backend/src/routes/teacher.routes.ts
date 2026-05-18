@@ -5,12 +5,17 @@ import {
   startAttendance,
   markAttendance,
   submitAttendance,
+  notifyGuardians,
   getAttendanceHistory,
   getClassStudents,
 } from '../controllers/teacher.controller';
 import { authenticate, authorize } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { startAttendanceSchema, markAttendanceSchema } from '../validators';
+import {
+  startAttendanceSchema,
+  markAttendanceSchema,
+  notifyGuardiansSchema,
+} from '../validators';
 
 const router = Router();
 
@@ -79,6 +84,46 @@ router.post('/:classId/attendance', validate(markAttendanceSchema), markAttendan
  *       - bearerAuth: []
  */
 router.post('/:classId/attendance/submit', submitAttendance);
+
+/**
+ * @swagger
+ * /api/teacher/{classId}/attendance/notify-guardians:
+ *   post:
+ *     summary: Send WhatsApp attendance reports to guardians via Meta Cloud API
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: classId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [subject]
+ *             properties:
+ *               subject:
+ *                 type: string
+ *               date:
+ *                 type: string
+ *                 description: YYYY-MM-DD. Defaults to today.
+ *               statuses:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   enum: [present, absent, late]
+ *                 description: Optional filter — only notify guardians of students with these statuses.
+ */
+router.post(
+  '/:classId/attendance/notify-guardians',
+  validate(notifyGuardiansSchema),
+  notifyGuardians
+);
 
 /**
  * @swagger

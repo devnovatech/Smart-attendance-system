@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { db } from '../config/firebase';
 import { AttendanceRecord, AttendanceEntry } from '../types';
+import {
+  isWhatsAppConfigured,
+  sendBatch,
+  AttendanceReport,
+} from '../services/whatsapp.service';
 
 export const getTimetable = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -240,6 +245,108 @@ export const submitAttendance = async (req: Request, res: Response): Promise<voi
   }
 };
 
+export const notifyGuardians = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { classId } = req.params;
+    const teacherId = req.user!.uid;
+    const today = new Date().toISOString().split('T')[0];
+    const { subject, date = today, statuses } = req.body as {
+      subject: string;
+      date?: string;
+      statuses?: AttendanceEntry['status'][];
+    };
+
+    if (!isWhatsAppConfigured()) {
+      res.status(503).json({
+        success: false,
+        error:
+          'WhatsApp notifications are not configured on the server. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.',
+      });
+      return;
+    }
+
+    const snapshot = await db
+      .collection('attendance_records')
+      .where('classId', '==', classId)
+      .where('date', '==', date)
+      .get();
+
+    const recordDoc = snapshot.docs.find((doc) => {
+      const data = doc.data() as AttendanceRecord;
+      return data.teacherId === teacherId && data.subject === subject;
+    });
+
+    if (!recordDoc) {
+      res.status(404).json({ success: false, error: 'Attendance record not found' });
+      return;
+    }
+
+    const entries = ((recordDoc.data() as AttendanceRecord).records || []).filter((entry) =>
+      statuses && statuses.length > 0 ? statuses.includes(entry.status) : true
+    );
+
+    if (entries.length === 0) {
+      res.json({ success: true, data: { sent: 0, failed: 0, skipped: 0 } });
+      return;
+    }
+
+    const userDocs = await Promise.all(
+      entries.map((entry) => db.collection('users').doc(entry.studentId).get())
+    );
+
+    type Work = { entry: AttendanceEntry; report: AttendanceReport } | { entry: AttendanceEntry };
+    const work: Work[] = entries.map((entry, i) => {
+      const userDoc = userDocs[i];
+      if (!userDoc.exists) return { entry };
+      const user = userDoc.data() as { displayName?: string; guardianPhone?: string };
+      if (!user?.guardianPhone) return { entry };
+      return {
+        entry,
+        report: {
+          guardianPhone: user.guardianPhone,
+          studentName: user.displayName || 'Student',
+          subject,
+          date,
+          status: entry.status,
+        },
+      };
+    });
+
+    const toSend = work.filter((w): w is { entry: AttendanceEntry; report: AttendanceReport } =>
+      'report' in w
+    );
+    const skippedCount = work.length - toSend.length;
+
+    const results = await sendBatch(toSend.map((w) => w.report));
+
+    let sent = 0;
+    let failed = 0;
+    const errors: { studentId: string; error: string }[] = [];
+    results.forEach((r, i) => {
+      if (r.ok) sent++;
+      else {
+        failed++;
+        errors.push({ studentId: toSend[i].entry.studentId, error: r.error || 'unknown' });
+      }
+    });
+
+    await db.collection('attendance_logs').add({
+      action: 'NOTIFY_GUARDIANS',
+      userId: teacherId,
+      details: `Notified guardians for class ${classId}, subject ${subject}, date ${date}. Sent: ${sent}, Failed: ${failed}, Skipped: ${skippedCount}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({
+      success: true,
+      data: { sent, failed, skipped: skippedCount, errors: errors.length ? errors : undefined },
+    });
+  } catch (error) {
+    console.error('notifyGuardians error:', error);
+    res.status(500).json({ success: false, error: 'Failed to notify guardians' });
+  }
+};
+
 export const getAttendanceHistory = async (req: Request, res: Response): Promise<void> => {
   try {
     const { classId } = req.params;
@@ -313,6 +420,7 @@ export const getClassStudents = async (req: Request, res: Response): Promise<voi
           department: data?.department || '',
           photoURL: data?.photoURL || '',
           role: data?.role || 'student',
+          guardianPhone: data?.guardianPhone || '',
         });
       }
     }

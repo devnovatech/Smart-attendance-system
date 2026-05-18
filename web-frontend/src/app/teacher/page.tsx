@@ -6,7 +6,11 @@ import AppLayout from '@/components/layout/AppLayout';
 import api from '@/lib/api';
 import { ApiResponse, User, AttendanceStatus } from '@/types';
 import toast from 'react-hot-toast';
-import { Check, X, Clock, AlertTriangle, Send, Users } from 'lucide-react';
+import { Check, X, Clock, AlertTriangle, Send, Users, MessageCircle } from 'lucide-react';
+import { sendWhatsAppReports } from '@/lib/whatsapp';
+
+const NOT_CONFIGURED_HINT =
+  'WhatsApp is not configured on the server. Ask an admin to set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.';
 
 interface StudentAttendance {
   student: User;
@@ -65,16 +69,48 @@ function TeacherAttendanceContent() {
     await submitAttendance(false);
   };
 
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+
   const submitAttendance = async (confirmSkipped: boolean) => {
     setSubmitting(true);
     try {
       await api.post(`/teacher/${classId}/attendance/submit`, { confirmSkipped });
       toast.success('Attendance submitted successfully!');
       setShowSkippedModal(false);
+
+      // Check if any students have guardian phone numbers
+      const hasGuardians = students.some((s) => s.student.guardianPhone);
+      if (hasGuardians) {
+        setShowWhatsAppModal(true);
+      }
     } catch {
       toast.error('Failed to submit attendance');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    const toastId = toast.loading('Sending WhatsApp notifications...');
+
+    try {
+      const result = await sendWhatsAppReports(classId!, subject!);
+      setShowWhatsAppModal(false);
+      toast.dismiss(toastId);
+
+      if (result.sent > 0) {
+        toast.success(`WhatsApp reports sent to ${result.sent} guardian(s)`);
+      }
+      if (result.skipped > 0) {
+        toast(`${result.skipped} student(s) don't have guardian numbers`, { icon: 'ℹ️' });
+      }
+      if (result.failed > 0) {
+        toast.error(`Failed to send to ${result.failed} guardian(s)`);
+      }
+    } catch (err) {
+      toast.dismiss(toastId);
+      const message = err instanceof Error ? err.message : '';
+      toast.error(message.includes('not configured') ? NOT_CONFIGURED_HINT : 'Failed to send WhatsApp notifications');
     }
   };
 
@@ -237,6 +273,32 @@ function TeacherAttendanceContent() {
                   className="btn-primary flex-1"
                 >
                   {submitting ? 'Submitting...' : 'Confirm & Submit'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* WhatsApp Notification Modal */}
+        {showWhatsAppModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+              <div className="flex items-center gap-3 mb-4">
+                <MessageCircle className="w-6 h-6 text-green-500" />
+                <h3 className="text-lg font-semibold">Send WhatsApp Reports</h3>
+              </div>
+              <p className="text-gray-600 mb-4">
+                Attendance has been submitted. Would you like to send attendance reports to students&apos; guardians via WhatsApp?
+              </p>
+              <div className="text-sm text-gray-500 mb-4">
+                {students.filter((s) => s.student.guardianPhone).length} student(s) have guardian numbers configured.
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowWhatsAppModal(false)} className="btn-secondary flex-1">
+                  Skip
+                </button>
+                <button onClick={handleSendWhatsApp} className="btn-primary flex-1 bg-green-600 hover:bg-green-700 flex items-center justify-center gap-2">
+                  <MessageCircle className="w-4 h-4" />
+                  Send Reports
                 </button>
               </div>
             </div>

@@ -10,6 +10,7 @@ export interface User {
   studentId?: string;
   department?: string;
   photoURL?: string;
+  guardianPhone?: string;
 }
 
 export interface Timetable {

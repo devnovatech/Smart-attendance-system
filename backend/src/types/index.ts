@@ -11,6 +11,7 @@ export interface User {
   studentId?: string;
   department?: string;
   photoURL?: string;
+  guardianPhone?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -19,14 +20,15 @@ export interface Timetable {
   id: string;
   teacherId: string;
   classId: string;
-  subject: string;
+  courseId: string;
+  subject: string; // Snapshot of course name; preserved on attendance records
   dayOfWeek: number; // 0-6
   startTime: string; // HH:mm
   endTime: string; // HH:mm
   room: string;
 }
 
-export interface Subject {
+export interface Course {
   id: string;
   name: string;
   code: string;
@@ -43,12 +45,14 @@ export interface Class {
   section: string;
   academicYear: string;
   studentIds: string[];
+  courseIds: string[];
 }
 
 export interface AttendanceRecord {
   id: string;
   classId: string;
   teacherId: string;
+  courseId?: string;
   subject: string;
   date: string; // YYYY-MM-DD
   startedAt: string;
@@ -77,6 +81,7 @@ export interface Config {
   lateMarkMinutes: number;
   allowOfflineSync: boolean;
   maxSyncRetries: number;
+  departments: string[];
 }
 
 export interface SyncQueueItem {
@@ -114,4 +119,15 @@ export interface DecodedToken {
   uid: string;
   email: string;
   role: UserRole;
+}
+
+export interface BulkUserRow {
+  email: string;
+  password: string;
+  displayName: string;
+  role: UserRole;
+  rollNumber?: string;
+  studentId?: string;
+  department?: string;
+  guardianPhone?: string;
 }

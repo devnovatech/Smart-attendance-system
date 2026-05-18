@@ -1,8 +1,10 @@
 import { Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
-import { User, AttendanceEntry, Subject, Timetable } from '../types';
+import { User, AttendanceEntry, Course, Timetable, BulkUserRow } from '../types';
 import * as XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
+
+const DEFAULT_DEPARTMENTS = ['Computer Science', 'Electronics', 'Mechanical'];
 
 // ---- User Management ----
 
@@ -11,16 +13,34 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const role = req.query.role as string;
+    const search = ((req.query.search as string) || '').trim().toLowerCase();
 
     let query: FirebaseFirestore.Query = db.collection('users');
     if (role) query = query.where('role', '==', role);
 
     // Get all docs first (avoid .count() which may not be supported)
     const allSnapshot = await query.get();
-    const total = allSnapshot.size;
 
-    // Manual pagination from the full result
-    const allDocs = allSnapshot.docs;
+    let allDocs = allSnapshot.docs;
+    if (search) {
+      allDocs = allDocs.filter((doc) => {
+        const d = doc.data();
+        const haystack = [
+          d.displayName,
+          d.email,
+          d.rollNumber,
+          d.studentId,
+          d.department,
+          d.guardianPhone,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(search);
+      });
+    }
+
+    const total = allDocs.length;
     const startIdx = (page - 1) * limit;
     const paginatedDocs = allDocs.slice(startIdx, startIdx + limit);
 
@@ -42,7 +62,7 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
 
 export const createUser = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, displayName, role, rollNumber, studentId, department } = req.body;
+    const { email, password, displayName, role, rollNumber, studentId, department, guardianPhone } = req.body;
 
     const userRecord = await auth.createUser({ email, password, displayName });
     await auth.setCustomUserClaims(userRecord.uid, { role });
@@ -54,6 +74,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
       rollNumber,
       studentId,
       department,
+      ...(guardianPhone ? { guardianPhone } : {}),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -75,6 +96,55 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
     console.error('createUser error:', error);
     const message = error instanceof Error ? error.message : 'Failed to create user';
     res.status(500).json({ success: false, error: message });
+  }
+};
+
+export const bulkCreateUsers = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { users } = req.body as { users: BulkUserRow[] };
+
+    const results = {
+      created: [] as { email: string; uid: string }[],
+      failed: [] as { email: string; error: string }[],
+    };
+
+    for (const row of users) {
+      try {
+        const { email, password, displayName, role, rollNumber, studentId, department, guardianPhone } = row;
+        const userRecord = await auth.createUser({ email, password, displayName });
+        await auth.setCustomUserClaims(userRecord.uid, { role });
+
+        const userData: Omit<User, 'uid'> = {
+          email,
+          displayName,
+          role,
+          ...(rollNumber ? { rollNumber } : {}),
+          ...(studentId ? { studentId } : {}),
+          ...(department ? { department } : {}),
+          ...(guardianPhone ? { guardianPhone } : {}),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        await db.collection('users').doc(userRecord.uid).set(userData);
+        results.created.push({ email, uid: userRecord.uid });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to create user';
+        results.failed.push({ email: row.email, error: message });
+      }
+    }
+
+    await db.collection('attendance_logs').add({
+      action: 'BULK_CREATE_USERS',
+      userId: req.user!.uid,
+      details: `Bulk imported users — created ${results.created.length}, failed ${results.failed.length}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(207).json({ success: true, data: results });
+  } catch (error) {
+    console.error('bulkCreateUsers error:', error);
+    res.status(500).json({ success: false, error: 'Failed to bulk import users' });
   }
 };
 
@@ -243,7 +313,7 @@ export const exportExcel = async (req: Request, res: Response): Promise<void> =>
 
         rows.push({
           Date: (data as Record<string, unknown>).date,
-          Subject: (data as Record<string, unknown>).subject,
+          Course: (data as Record<string, unknown>).subject,
           'Student Name': studentName,
           'Roll Number': rollNumber,
           'Student ID': studentIdVal,
@@ -328,13 +398,21 @@ export const getConfig = async (req: Request, res: Response): Promise<void> => {
         lateMarkMinutes: 15,
         allowOfflineSync: true,
         maxSyncRetries: 3,
+        departments: DEFAULT_DEPARTMENTS,
       };
       await db.collection('config').doc('global').set(defaultConfig);
       res.json({ success: true, data: defaultConfig });
       return;
     }
 
-    res.json({ success: true, data: configDoc.data() });
+    const data = configDoc.data() || {};
+    // Backfill departments for legacy configs created before this field existed
+    if (!data.departments) {
+      data.departments = DEFAULT_DEPARTMENTS;
+      await db.collection('config').doc('global').set({ departments: DEFAULT_DEPARTMENTS }, { merge: true });
+    }
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error('getConfig error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch config' });
@@ -361,39 +439,71 @@ export const updateConfig = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-// ---- Subject Management ----
+export const getDepartments = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const configDoc = await db.collection('config').doc('global').get();
+    const departments: string[] = configDoc.exists
+      ? (configDoc.data()?.departments as string[]) || DEFAULT_DEPARTMENTS
+      : DEFAULT_DEPARTMENTS;
+    res.json({ success: true, data: departments });
+  } catch (error) {
+    console.error('getDepartments error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch departments' });
+  }
+};
 
-export const getSubjects = async (req: Request, res: Response): Promise<void> => {
+export const updateDepartments = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { departments } = req.body as { departments: string[] };
+    await db.collection('config').doc('global').set({ departments }, { merge: true });
+
+    await db.collection('attendance_logs').add({
+      action: 'UPDATE_DEPARTMENTS',
+      userId: req.user!.uid,
+      details: `Updated department list (${departments.length} entries)`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, data: departments });
+  } catch (error) {
+    console.error('updateDepartments error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update departments' });
+  }
+};
+
+// ---- Course Management ----
+
+export const getCourses = async (req: Request, res: Response): Promise<void> => {
   try {
     const department = req.query.department as string | undefined;
     const semester = req.query.semester as string | undefined;
 
-    let query: FirebaseFirestore.Query = db.collection('subjects');
+    let query: FirebaseFirestore.Query = db.collection('courses');
     if (department) query = query.where('department', '==', department);
     if (semester) query = query.where('semester', '==', parseInt(semester));
 
     const snapshot = await query.get();
-    const subjects = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const courses = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-    res.json({ success: true, data: subjects });
+    res.json({ success: true, data: courses });
   } catch (error) {
-    console.error('getSubjects error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch subjects' });
+    console.error('getCourses error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch courses' });
   }
 };
 
-export const createSubject = async (req: Request, res: Response): Promise<void> => {
+export const createCourse = async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, code, department, semester, credits } = req.body;
 
     // Check for duplicate code
-    const existing = await db.collection('subjects').where('code', '==', code).get();
+    const existing = await db.collection('courses').where('code', '==', code).get();
     if (!existing.empty) {
-      res.status(400).json({ success: false, error: 'Subject code already exists' });
+      res.status(400).json({ success: false, error: 'Course code already exists' });
       return;
     }
 
-    const subjectData: Omit<Subject, 'id'> = {
+    const courseData: Omit<Course, 'id'> = {
       name,
       code,
       department,
@@ -401,59 +511,59 @@ export const createSubject = async (req: Request, res: Response): Promise<void> 
       credits,
     };
 
-    const docRef = await db.collection('subjects').add(subjectData);
+    const docRef = await db.collection('courses').add(courseData);
 
     await db.collection('attendance_logs').add({
-      action: 'CREATE_SUBJECT',
+      action: 'CREATE_COURSE',
       userId: req.user!.uid,
-      details: `Created subject ${name} (${code})`,
+      details: `Created course ${name} (${code})`,
       timestamp: new Date().toISOString(),
     });
 
-    res.status(201).json({ success: true, data: { id: docRef.id, ...subjectData } });
+    res.status(201).json({ success: true, data: { id: docRef.id, ...courseData } });
   } catch (error) {
-    console.error('createSubject error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create subject' });
+    console.error('createCourse error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create course' });
   }
 };
 
-export const updateSubject = async (req: Request, res: Response): Promise<void> => {
+export const updateCourse = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const updates = req.body;
 
-    const subjectDoc = await db.collection('subjects').doc(id).get();
-    if (!subjectDoc.exists) {
-      res.status(404).json({ success: false, error: 'Subject not found' });
+    const courseDoc = await db.collection('courses').doc(id).get();
+    if (!courseDoc.exists) {
+      res.status(404).json({ success: false, error: 'Course not found' });
       return;
     }
 
-    await db.collection('subjects').doc(id).update(updates);
+    await db.collection('courses').doc(id).update(updates);
 
     res.json({ success: true, data: { id, ...updates } });
   } catch (error) {
-    console.error('updateSubject error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update subject' });
+    console.error('updateCourse error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update course' });
   }
 };
 
-export const deleteSubject = async (req: Request, res: Response): Promise<void> => {
+export const deleteCourse = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
 
-    await db.collection('subjects').doc(id).delete();
+    await db.collection('courses').doc(id).delete();
 
     await db.collection('attendance_logs').add({
-      action: 'DELETE_SUBJECT',
+      action: 'DELETE_COURSE',
       userId: req.user!.uid,
-      details: `Deleted subject ${id}`,
+      details: `Deleted course ${id}`,
       timestamp: new Date().toISOString(),
     });
 
-    res.json({ success: true, message: 'Subject deleted successfully' });
+    res.json({ success: true, message: 'Course deleted successfully' });
   } catch (error) {
-    console.error('deleteSubject error:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete subject' });
+    console.error('deleteCourse error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete course' });
   }
 };
 
@@ -469,7 +579,15 @@ export const getClasses = async (req: Request, res: Response): Promise<void> => 
     if (semester) query = query.where('semester', '==', parseInt(semester));
 
     const snapshot = await query.get();
-    const classes = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const classes = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        // Backfill courseIds for legacy class docs
+        courseIds: data.courseIds || [],
+      };
+    });
 
     res.json({ success: true, data: classes });
   } catch (error) {
@@ -480,7 +598,7 @@ export const getClasses = async (req: Request, res: Response): Promise<void> => 
 
 export const createClass = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, department, semester, section, academicYear } = req.body;
+    const { name, department, semester, section, academicYear, courseIds } = req.body;
 
     const classData = {
       name,
@@ -489,6 +607,7 @@ export const createClass = async (req: Request, res: Response): Promise<void> =>
       section,
       academicYear: academicYear || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
       studentIds: [],
+      courseIds: Array.isArray(courseIds) ? courseIds : [],
     };
 
     const docRef = await db.collection('classes').add(classData);
@@ -518,8 +637,10 @@ export const updateClass = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Don't allow overwriting studentIds through general update
+    // Don't allow overwriting studentIds / courseIds through general update;
+    // use the dedicated endpoints instead.
     delete updates.studentIds;
+    delete updates.courseIds;
 
     await db.collection('classes').doc(id).update(updates);
 
@@ -620,6 +741,70 @@ export const removeStudentsFromClass = async (req: Request, res: Response): Prom
   }
 };
 
+// ---- Class-Course Assignment ----
+
+export const assignCoursesToClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { courseIds } = req.body as { courseIds: string[] };
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    const currentData = classDoc.data();
+    const currentCourseIds: string[] = currentData?.courseIds || [];
+    const newCourseIds = [...new Set([...currentCourseIds, ...courseIds])];
+
+    await db.collection('classes').doc(id).update({ courseIds: newCourseIds });
+
+    await db.collection('attendance_logs').add({
+      action: 'ASSIGN_COURSES',
+      userId: req.user!.uid,
+      details: `Assigned ${courseIds.length} course(s) to class ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, data: { classId: id, courseIds: newCourseIds } });
+  } catch (error) {
+    console.error('assignCoursesToClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to assign courses' });
+  }
+};
+
+export const removeCoursesFromClass = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { courseIds } = req.body as { courseIds: string[] };
+
+    const classDoc = await db.collection('classes').doc(id).get();
+    if (!classDoc.exists) {
+      res.status(404).json({ success: false, error: 'Class not found' });
+      return;
+    }
+
+    const currentData = classDoc.data();
+    const currentCourseIds: string[] = currentData?.courseIds || [];
+    const updatedCourseIds = currentCourseIds.filter((cid) => !courseIds.includes(cid));
+
+    await db.collection('classes').doc(id).update({ courseIds: updatedCourseIds });
+
+    await db.collection('attendance_logs').add({
+      action: 'REMOVE_COURSES',
+      userId: req.user!.uid,
+      details: `Removed ${courseIds.length} course(s) from class ${id}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, data: { classId: id, courseIds: updatedCourseIds } });
+  } catch (error) {
+    console.error('removeCoursesFromClass error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove courses' });
+  }
+};
+
 export const getClassDetails = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
@@ -630,8 +815,9 @@ export const getClassDetails = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const classData = classDoc.data();
-    const studentIds: string[] = classData?.studentIds || [];
+    const classData = classDoc.data() || {};
+    const studentIds: string[] = classData.studentIds || [];
+    const courseIds: string[] = classData.courseIds || [];
 
     // Fetch student details
     const students = [];
@@ -646,7 +832,17 @@ export const getClassDetails = async (req: Request, res: Response): Promise<void
           rollNumber: data?.rollNumber || '',
           studentId: data?.studentId || '',
           department: data?.department || '',
+          guardianPhone: data?.guardianPhone || '',
         });
+      }
+    }
+
+    // Fetch course details
+    const courses = [];
+    for (const cid of courseIds) {
+      const courseDoc = await db.collection('courses').doc(cid).get();
+      if (courseDoc.exists) {
+        courses.push({ id: courseDoc.id, ...courseDoc.data() });
       }
     }
 
@@ -659,7 +855,9 @@ export const getClassDetails = async (req: Request, res: Response): Promise<void
       data: {
         id: classDoc.id,
         ...classData,
+        courseIds,
         students,
+        courses,
         timetables,
       },
     });
@@ -711,7 +909,7 @@ export const getTimetables = async (req: Request, res: Response): Promise<void> 
 
 export const createTimetable = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { teacherId, classId, subject, dayOfWeek, startTime, endTime, room } = req.body;
+    const { teacherId, classId, courseId, dayOfWeek, startTime, endTime, room } = req.body;
 
     // Validate teacher exists and is a teacher
     const teacherDoc = await db.collection('users').doc(teacherId).get();
@@ -727,14 +925,35 @@ export const createTimetable = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Check for time conflicts for the teacher
-    const teacherSchedule = await db
+    // Validate course exists and fetch its name to snapshot
+    const courseDoc = await db.collection('courses').doc(courseId).get();
+    if (!courseDoc.exists) {
+      res.status(400).json({ success: false, error: 'Invalid course ID' });
+      return;
+    }
+    const courseName: string = courseDoc.data()?.name || '';
+
+    // Check for room conflicts on the same day and overlapping time
+    const roomSchedule = await db
       .collection('timetables')
-      .where('teacherId', '==', teacherId)
       .where('dayOfWeek', '==', dayOfWeek)
       .get();
 
-    const hasConflict = teacherSchedule.docs.some((doc) => {
+    const hasRoomConflict = roomSchedule.docs.some((doc) => {
+      const data = doc.data();
+      if (data.room?.trim().toLowerCase() !== room.trim().toLowerCase()) return false;
+      return startTime < data.endTime && endTime > data.startTime;
+    });
+
+    if (hasRoomConflict) {
+      res.status(400).json({ success: false, error: 'Room is already booked for this time slot' });
+      return;
+    }
+
+    // Check for time conflicts for the teacher
+    const teacherSchedule = roomSchedule.docs.filter((doc) => doc.data().teacherId === teacherId);
+
+    const hasConflict = teacherSchedule.some((doc) => {
       const data = doc.data();
       return startTime < data.endTime && endTime > data.startTime;
     });
@@ -745,13 +964,9 @@ export const createTimetable = async (req: Request, res: Response): Promise<void
     }
 
     // Check for time conflicts for the class
-    const classSchedule = await db
-      .collection('timetables')
-      .where('classId', '==', classId)
-      .where('dayOfWeek', '==', dayOfWeek)
-      .get();
+    const classSchedule = roomSchedule.docs.filter((doc) => doc.data().classId === classId);
 
-    const hasClassConflict = classSchedule.docs.some((doc) => {
+    const hasClassConflict = classSchedule.some((doc) => {
       const data = doc.data();
       return startTime < data.endTime && endTime > data.startTime;
     });
@@ -764,7 +979,8 @@ export const createTimetable = async (req: Request, res: Response): Promise<void
     const timetableData: Omit<Timetable, 'id'> = {
       teacherId,
       classId,
-      subject,
+      courseId,
+      subject: courseName,
       dayOfWeek,
       startTime,
       endTime,
@@ -776,7 +992,7 @@ export const createTimetable = async (req: Request, res: Response): Promise<void
     await db.collection('attendance_logs').add({
       action: 'CREATE_TIMETABLE',
       userId: req.user!.uid,
-      details: `Created timetable: ${subject} for class ${classDoc.data()?.name}, teacher ${teacherDoc.data()?.displayName}, day ${dayOfWeek}`,
+      details: `Created timetable: ${courseName} for class ${classDoc.data()?.name}, teacher ${teacherDoc.data()?.displayName}, day ${dayOfWeek}`,
       timestamp: new Date().toISOString(),
     });
 
@@ -790,12 +1006,22 @@ export const createTimetable = async (req: Request, res: Response): Promise<void
 export const updateTimetable = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
 
     const ttDoc = await db.collection('timetables').doc(id).get();
     if (!ttDoc.exists) {
       res.status(404).json({ success: false, error: 'Timetable entry not found' });
       return;
+    }
+
+    // If courseId is being changed, refresh the snapshot of subject (course name)
+    if (updates.courseId) {
+      const courseDoc = await db.collection('courses').doc(updates.courseId).get();
+      if (!courseDoc.exists) {
+        res.status(400).json({ success: false, error: 'Invalid course ID' });
+        return;
+      }
+      updates.subject = courseDoc.data()?.name || '';
     }
 
     await db.collection('timetables').doc(id).update(updates);

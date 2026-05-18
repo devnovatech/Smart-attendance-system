@@ -31,7 +31,7 @@ const studentLinks = [
 const adminLinks = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/users', label: 'Manage Users', icon: Users },
-  { href: '/admin/subjects', label: 'Subjects', icon: BookOpen },
+  { href: '/admin/courses', label: 'Courses', icon: BookOpen },
   { href: '/admin/classes', label: 'Classes', icon: GraduationCap },
   { href: '/admin/timetable', label: 'Timetable', icon: Clock },
   { href: '/admin/reports', label: 'Reports', icon: BarChart3 },
